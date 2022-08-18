@@ -3,12 +3,12 @@
 */
 
 /**
- * This will take in some params and return a presigned url
+ * This will expose a presigned url to map to an aem file
  */
 
 
 const fetch = require('node-fetch')
-const { Core, Files } = require('@adobe/aio-sdk')
+const { Core, State } = require('@adobe/aio-sdk')
 const { errorResponse, getBearerToken, stringParameters, checkMissingRequestInputs } = require('../utils')
 
 // main function that will be executed by Adobe I/O Runtime
@@ -24,7 +24,7 @@ async function main (params) {
     logger.debug(stringParameters(params))
 
     // check for missing request input parameters and headers
-    const requiredParams = ['filePath','fileName']
+    const requiredParams = ['aemFilePath']
     const requiredHeaders = ['Authorization']
     const errorMessage = checkMissingRequestInputs(params, requiredParams, requiredHeaders)
     if (errorMessage) {
@@ -42,33 +42,33 @@ async function main (params) {
       params.permissions = 'r'
     }
 
-    logger.info(`params.filePath.length ${params.filePath.length}`)
-    if(params.filePath.length < 2){
-      return errorResponse(400, "you need to specify a filePath IE myFolder/test/", logger)
+    logger.info(`params.aemFilePath.length ${params.aemFilePath.length}`)
+    if(params.aemFilePath.length < 2){
+      return errorResponse(400, "you need to specify an AEM file path aemFilePath IE /assets/myFolder/test/file.jpg", logger)
     }
-    if(params.filePath.startsWith("/")){
-      params.filePath = params.filePath.substr(1)
-    }
-    if(!params.filePath.endsWith("/")){
-      params.filePath = `${params.filePath}/`
+    if(!params.aemFilePath.startsWith("/")){
+      return errorResponse(400, "you need to specify an AEM file path aemFilePath IE /assets/myFolder/test/file.jpg", logger)
     }
 
-    if(params.fileName.length < 2){
-      return errorResponse(400, "you need to specify a fileName", logger)
+    const randMin = 25
+    const randMax = 100
+    const randomLength = Math.floor(Math.random() * (randMax - randMin)) + randMin + 1
+    const preSignUrl = `/api/v1/web/dx-excshell-1/${Math.random().toString(16).substr(2, randomLength)}`;
+    let presignedData = {
+      aemFilePath:`${params.aemFilePath}`,
+      expiryInSeconds: params.expiryInSeconds,
+      permissions: params.permissions,
+      preSignUrl: `${preSignUrl}`
     }
 
     let response = {
       statusCode: 200,
-      body: {
-        presignedPath:`${params.filePath}${params.fileName}`,
-        expiryInSeconds: params.expiryInSeconds,
-        permissions: params.permissions
-      }
+      body: presignedData
     }
 
-    const files = await Files.init()
-    const preSignUrl = await files.generatePresignURL(`${params.filePath}${params.fileName}`, { expiryInSeconds: params.expiryInSeconds, permissions: params.permissions })
-    response.body.presignedUrl = preSignUrl
+    //store this data in state store to be used by presigned endpoint
+    const state = await State.init()
+    await state.put(encodeURIComponent(preSignUrl), presignedData, { ttl: params.expiryInSeconds }) // -1 for no expiry, defaults to 86400 (24 hours)
     
     return response
   } catch (error) {
