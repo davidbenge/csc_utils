@@ -11,12 +11,14 @@ Parameters
 **fileName**: target file name myfile.jpg  
 **expiryInSeconds**: value in seconds before the url becomes invalid  
 **permissions**: permission for the url in rwd
+**cecUtilKey**: This key is used to store reference to the request and can be used to help move files into AEM 
 ``` javascript
 {
     "filePath":"test",
     "fileName":"test.jpg",
     "expiryInSeconds":360,
-    "permissions":"rw"
+    "permissions":"rw",
+    "cecUtilKey":"myReferenceKey"
 }
 ```
 Results Example 

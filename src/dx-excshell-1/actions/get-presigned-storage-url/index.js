@@ -8,8 +8,9 @@
 
 
 const fetch = require('node-fetch')
-const { Core, Files } = require('@adobe/aio-sdk')
+const { Core, Files, State } = require('@adobe/aio-sdk')
 const { errorResponse, getBearerToken, stringParameters, checkMissingRequestInputs } = require('../utils')
+const uuid = require('uuid')
 
 // main function that will be executed by Adobe I/O Runtime
 async function main (params) {
@@ -18,19 +19,21 @@ async function main (params) {
 
   try {
     // 'info' is the default level if not set
-    logger.info('Calling the main action get-presigned-url')
+    logger.info('Calling the main action get-presigned-storage-url')
 
     // log parameters, only if params.LOG_LEVEL === 'debug'
     logger.debug(stringParameters(params))
 
     // check for missing request input parameters and headers
-    const requiredParams = ['filePath','fileName']
+    const requiredParams = ['fileName']
     const requiredHeaders = ['Authorization']
     const errorMessage = checkMissingRequestInputs(params, requiredParams, requiredHeaders)
     if (errorMessage) {
       // return and log client errors
       return errorResponse(400, errorMessage, logger)
     }
+
+    const cscUtilKey = uuid.v4()
 
     // extract the user Bearer token from the Authorization header
     //const token = getBearerToken(params)
@@ -39,18 +42,7 @@ async function main (params) {
     }
 
     if(!params.permissions){
-      params.permissions = 'r'
-    }
-
-    logger.info(`params.filePath.length ${params.filePath.length}`)
-    if(params.filePath.length < 2){
-      return errorResponse(400, "you need to specify a filePath IE myFolder/test/", logger)
-    }
-    if(params.filePath.startsWith("/")){
-      params.filePath = params.filePath.substr(1)
-    }
-    if(!params.filePath.endsWith("/")){
-      params.filePath = `${params.filePath}/`
+      params.permissions = 'w'
     }
 
     if(params.fileName.length < 2){
@@ -60,15 +52,21 @@ async function main (params) {
     let response = {
       statusCode: 200,
       body: {
-        presignedPath:`${params.filePath}${params.fileName}`,
+        fileName: params.fileName,
+        cscUtilKey: cscUtilKey,
         expiryInSeconds: params.expiryInSeconds,
         permissions: params.permissions
       }
     }
 
     const files = await Files.init()
-    const preSignUrl = await files.generatePresignURL(`${params.filePath}${params.fileName}`, { expiryInSeconds: params.expiryInSeconds, permissions: params.permissions })
+    const state = await State.init()
+    const uploadPath = `${cscUtilKey}/${params.fileName}`
+    const preSignUrl = await files.generatePresignURL(uploadPath, { expiryInSeconds: params.expiryInSeconds, permissions: params.permissions })
     response.body.presignedUrl = preSignUrl
+    response.body.uploadPath = uploadPath //TEST
+
+    await state.put(cscUtilKey, { "preSignedData": response.body }, { ttl: 345600 }) // -4 days
     
     return response
   } catch (error) {
