@@ -1,0 +1,17 @@
+{
+    "objectType":"task",
+    "objectFilter":{
+        "DE:Artwork Profile":"standalone"
+    },
+    "recipeType":"single_document",
+    "pages":[
+        {
+            "name":"page1",
+            "local_document_name":"IS_$TITLE_NAME$_HSCH_L3.0_3840x1280_zxx_V1_194129.png"
+        },
+        {   
+            "name":"page2",
+            "local_document_name":"IS_$TITLE_NAME$_HSCH_L3.91_3840x982_zxx_V1_194129.png"
+        }
+    ]
+}

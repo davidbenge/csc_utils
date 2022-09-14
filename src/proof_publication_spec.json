@@ -1,0 +1,44 @@
+{
+    "objectType":"task",
+    "objectFilter":{
+        "DE:Artwork Profile":"catalog"
+    },
+    "recipeType":"psd_object_pages",
+    "requiredArt":{
+        "IS_$TITLE_NAME$_TA_L1.78_3840x2160_en_V1_0.png":{"width":3840,"height":2160},
+        "IS_$TITLE_NAME$_HSCH_P.80_1920x2400_zxx_V1_0.png":{"width":1920,"height":2400}
+    },
+    "pages":{
+        "page1":{
+            "callSpec":{
+                "inputs":[
+                    {
+                        "href":"get_presigned_url","storage":"external"
+                    }
+                ],
+                "options":{
+                    "layers":[
+                        {
+                            "name":"New",
+                            "input":{
+                                "href":"get_presigned_url",
+                                "storage":"external"
+                            },
+                            "bounds":{
+                                "width":602,
+                                "height":400
+                            }
+                        }
+                    ]
+                },
+                "outputs":[
+                    {
+                        "storage":"external",
+                        "href":"put_presigned_url",
+                        "type":"image/vnd.adobe.photoshop"
+                    }
+                ]
+            }
+        }
+    }
+}
