@@ -118,7 +118,7 @@ async function main (params) {
           fileSpecs = file// TEST
         }
       })
-      response.body.listTest = JSON.stringify(fileList) //TEST
+      //response.body.listTest = JSON.stringify(fileList) //TEST
     }catch(errorMessage){
       return errorResponse(500, `Unable to get file properties for ${params.cscUtilKey}/${processState.preSignedData.fileName} :${errorMessage}`, logger)
     }    
@@ -137,17 +137,22 @@ async function main (params) {
       token: token,
       xApiKey: xApiKey
     }
+    logger.debug(` `)
+    logger.debug(`aemFileSpecs Is`)
+    logger.debug(JSON.stringify(aemFileSpecs,null,2))
+    logger.debug(` `)
 
     //GET the block init
-    let blockInitUrl = await createBlankAsset(aemFileSpecs,logger)
+    let blockInitUrl = await createBlankAsset(fileSpecs, aemFileSpecs, logger)
     logger.debug(`blockInitUrl ${blockInitUrl}`)
-    response.body.blockInitUrl = blockInitUrl // TEST
-    //let blockTranferSpec = await getblockTransfer(blockInitUrl,fileSpecs,aemFileSpecs,logger)
-    //response.body.blockTranferSpec = blockTranferSpec //TEST
+    response.body.createBlankAsset = blockInitUrl // TEST
+    let blockTranferSpec = await getblockTransferSpec(blockInitUrl,fileSpecs,aemFileSpecs,logger)
+    response.body.blockTranferSpec = blockTranferSpec //TEST
 
     // Send the file to AEM
-    //await startTransfer(aemFileSpecs,files, logger, fileSpecs, blockTranferSpec)
-    
+    let transferInfo = await startTransfer(aemFileSpecs,files, logger, fileSpecs, blockTranferSpec)
+    response.body.transferInfo = transferInfo
+
     return response
   } catch (error) {
     // log any server errors
@@ -157,91 +162,72 @@ async function main (params) {
   }
 }
 
-/**
- * 
- * @param {AemFileSpecs} aemFileSpecs 
- * @param {object} filesObject 
- * @param {object} logger 
- * @param {FileSpecs} fileSpecs 
- * @param {object} blockTranferSpec 
- * @returns 
- */
-async function startTransfer(aemFileSpecs,filesObject,logger, fileSpecs,blockTranferSpec) {
-  logger.debug(`startTransfer ${aemFileSpecs.aemFileName}`)
-  let chunkLoops = blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/transfer"]
-  const chunkCount = chunkLoops.length
-  const chunkSize = blockTranferSpec["repo:blocksize"]
-  let chunkPosition = 0
-  let fileData = [];
-
-  //for await(const data of fileTransferStream) {
-  for(let i = 0; (i < chunkCount); i++){
-      //let fileTransferStream = await filesObject.createReadStream(fileSpecs.name,{position:chunkPosition,length:chunkSize})
-      let fileTransferStream = await filesObject.createReadStream(fileSpecs.name,{position:chunkPosition,length:chunkSize})
-      for await(const data of fileTransferStream) {
-      //  fileData = fileData + data
-        fileData.push(data)
-      }
-      logger.debug(`Writing chunk i=${i} chunkSize=${chunkSize} contentLength=${fileSpecs.contentLength} chunkPosition=${chunkPosition}`)
-      await sendFilePartToAem(chunkLoops[i]["href"],fileData,aemFileSpecs,blockTranferSpec["dc:format"],logger) 
-      chunkPosition =  chunkPosition + chunkSize
-    }
-
-  //get the remainder
-  logger.debug(``)
-  logger.debug(``)
-  logger.debug(`Starting final chunk ${chunkPosition}`)
-  logger.debug(`Block Specs`)
-  logger.debug(JSON.stringify(blockTranferSpec,null,5))
-  logger.debug(``)
-  logger.debug(`File Specs`)
-  logger.debug(JSON.stringify(fileSpecs,null,5))
-  logger.debug(``)
-  logger.debug(`AEM File Specs`)
-  logger.debug(JSON.stringify(aemFileSpecs,null,5))
-  logger.debug(``)
-  
-  if(chunkPosition>=blockTranferSpec["repo:size"]){
-    logger.debug(`Writing FINAL !!!!!!!!`)
-    try {
-      const callOptions = {
-        method: 'post',
-        headers: {
-         //"Authorization":aemFileSpecs.token,
-         //"x-api-key":aemFileSpecs.xApiKey,
-         "Content-Type":"application/vnd.adobecloud.bulk-transfer+json"
-        },
-        body: JSON.stringify(blockTranferSpec)
-      }
-      const postRes = await fetch(blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/finalize"]["href"],callOptions)
-      if (!postRes.ok) {
-        throw new Error('POST FINALIZE to ' + blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/finalize"]["href"] + ' failed with status code ' + postRes.status)
-      }else{
-        logger.debug(`POST FINAL successful ${postRes.status} !!!!!!!!!!!!`)
-      }
-  
-      return true
-  
-    } catch (errorMessage) {
-      return errorResponse(500, `Unable PUT ${blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/finalize"]["href"]} :${errorMessage}`, logger)
-    }
-  }else{
-    logger.debug(`Something funky happened ${chunkPosition}`)
-  }
-
-  return true
-}
-
 /***
- * Get the block init
- * @param {object} processState
+ * createBlankAsset 
+ * Create the placeholder asset in AEM for the transfer to target
+ * 
  * @param {FileSpecs} fileSpecs
  * @param {AemFileSpecs} aemFileSpecs
  * @param {object} logger
  * 
  * @returns {object} blockInit
  */
-async function createBlankAsset(blockInitUrl,fileSpecs,aemFileSpecs,logger) {
+async function createBlankAsset(fileSpecs,aemFileSpecs,logger) {
+  let blockUploadLink //placeholder for the call result 
+
+  try {
+      const callOptions = {
+        method: 'post',
+        headers: {
+         "Authorization":aemFileSpecs.token,
+         "x-api-key":aemFileSpecs.xApiKey,
+         "Content-Type": fileSpecs.contentType
+        }
+      }
+
+      logger.debug(`createBlankAsset headers`)
+      logger.debug(JSON.stringify(callOptions.headers,null,2))
+
+      const placeHolderAssetCallUrl = `https://${aemFileSpecs.aemFqdn}/adobe/repository${aemFileSpecs.aemFilePath};api=create;path=${aemFileSpecs.aemFileName};mode=id`
+      const callResult = await fetch(placeHolderAssetCallUrl,callOptions)
+      if (!callResult.ok) {
+        throw new Error('request to ' + placeHolderAssetCallUrl + ' failed with status code ' + callResult.status)
+      }else{
+        logger.debug(`CREATE PLACEHOLDER ASSET successful ${callResult.status} !!!!!!!!!!!!`)
+
+        //Get the block upload url from the header
+        for (var pair of callResult.headers.entries()) {
+          // logger.debug(pair[0]+ ': '+ pair[1])
+          if(pair[0] == 'link'){
+            blockUploadLink = pair[1].match(/(?<=\<)(.*?)(?=\>)/g)[0] //get just the block upload url
+          }
+        }
+
+        if(blockUploadLink.length < 5){
+          return errorResponse(500, `Unable to do block init ${blockUploadLink} :${errorMessage}`, logger)
+        }
+
+        logger.debug(`CREATE PLACEHOLDER ASSET url is ${blockUploadLink} !!!!!!!!!!!!`)
+      }
+  } catch (errorMessage) {
+    return errorResponse(500, `Unable to do block init ${blockUploadLink} :${errorMessage}`, logger)
+  }
+
+  return blockUploadLink
+}
+
+/***
+ * getblockTransferSpec 
+ * Get the upload block spec for an asset
+ * 
+ * @param {string} blockInitUrl
+ * @param {FileSpecs} fileSpecs
+ * @param {AemFileSpecs} aemFileSpecs
+ * @param {object} logger
+ * 
+ * @returns {object} blockTransferSpec
+ */
+ async function getblockTransferSpec(blockInitUrl, fileSpecs,aemFileSpecs,logger) {
   let blockInitData
 
   let blockSpec = {
@@ -323,6 +309,118 @@ async function getBlockInit(aemFileSpecs,logger) {
     }
 }
 
+/**
+ * 
+ * @param {AemFileSpecs} aemFileSpecs 
+ * @param {object} filesObject 
+ * @param {object} logger 
+ * @param {FileSpecs} fileSpecs 
+ * @param {object} blockTranferSpec 
+ * @returns 
+ */
+ async function startTransfer( aemFileSpecs, filesObject, logger, fileSpecs, blockTranferSpec ) {
+  logger.debug(`startTransfer ${aemFileSpecs.aemFileName}`)
+  let chunkLoops = blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/transfer"]
+  const chunkCount = chunkLoops.length
+  const chunkSize = blockTranferSpec["repo:blocksize"]
+  let chunkPosition = 0
+  let fileData = Buffer.from([])
+  //let fileData = ''
+  let processInfo = {"status":500}
+  processInfo.chunkLoops = chunkLoops
+  processInfo.chunkCount = chunkCount
+  processInfo.chunkSize = chunkSize
+  processInfo.chunkSent = new Array()
+  processInfo.format = blockTranferSpec["dc:format"]
+  processInfo.finalizeUrl = blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/finalize"]["href"]
+
+  //for await(const data of fileTransferStream) {
+  for(let i = 0; (i < chunkCount); i++){
+      let fileTransferStream 
+      if(chunkSize > fileSpecs.contentLength){
+        logger.debug('chunk larger, full read')
+        fileTransferStream = await filesObject.createReadStream(fileSpecs.name)
+      }else{
+        logger.debug('chunk smaller, part read')
+        fileTransferStream = await filesObject.createReadStream(fileSpecs.name,{position:chunkPosition,length:chunkSize})
+      }
+
+      for await(const data of fileTransferStream) {
+        fileData = Buffer.concat([fileData, data], fileData.length+data.length)
+      }
+
+      logger.debug(`Writing chunk i=${i} chunkSize=${chunkSize} contentLength=${fileSpecs.contentLength} arrayLength=${fileData.length} chunkPosition=${chunkPosition}`)
+      let sentPartResult = await sendFilePartToAem(chunkLoops[i]["href"],fileData,aemFileSpecs,blockTranferSpec["dc:format"],logger) 
+      let chunkInfo = {
+        "i":i,
+        "arrayLength":fileData.length,
+        "chunkPosition": chunkPosition,
+        "format": blockTranferSpec["dc:format"],
+        "chunkUrl": chunkLoops[i]["href"],
+        "chunkCallStatus": sentPartResult
+      }
+      processInfo.chunkSent.push(chunkInfo)
+      chunkPosition =  chunkPosition + chunkSize
+  }
+
+  processInfo.chunkPosition = chunkPosition
+  processInfo.contentLength = fileSpecs.contentLength
+  processInfo.fileDataLength = fileData.length
+
+  //get the remainder
+  logger.debug(``)
+  logger.debug(``)
+  logger.debug(`Starting final chunk ${chunkPosition}`)
+  logger.debug(`Block Specs`)
+  logger.debug(JSON.stringify(blockTranferSpec,null,5))
+  logger.debug(``)
+  logger.debug(`File Specs`)
+  logger.debug(JSON.stringify(fileSpecs,null,5))
+  logger.debug(``)
+  logger.debug(`AEM File Specs`)
+  logger.debug(JSON.stringify(aemFileSpecs,null,5))
+  logger.debug(``)
+  
+  if(chunkPosition>=blockTranferSpec["repo:size"]){
+    logger.debug(`Writing FINAL !!!!!!!!`)
+
+    processInfo.finalize = {
+      "blockTranferSpec": blockTranferSpec,
+      "url": processInfo.finalizeUrl
+    }
+    try {
+      const callOptionsFinal = {
+        method: 'POST',
+        headers: {
+         "Content-Type":"application/vnd.adobecloud.bulk-transfer+json"
+        },
+        body: JSON.parse(JSON.stringify(blockTranferSpec))
+      }
+      const finalRes = await fetch(processInfo.finalizeUrl,callOptionsFinal)
+
+      processInfo.finalize.status = finalRes.status
+
+      if (!finalRes.ok) {
+        //throw new Error('POST FINALIZE to ' + blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/finalize"]["href"] + ' failed with status code ' + postRes.status)
+      }else{
+        logger.debug(`POST FINAL successful ${postRes.status} !!!!!!!!!!!!`)
+      }
+
+      return processInfo
+  
+    } catch (errorMessage) {
+      processInfo.finalize.status = 500
+      processInfo.finalize.error = errorMessage
+      //return errorResponse(500, `Unable to POST ${blockTranferSpec["_links"]["http://ns.adobe.com/adobecloud/rel/block/finalize"]["href"]} :${errorMessage}`, logger)
+    }
+  }else{
+    processInfo.status = 504
+    logger.debug(`Something funky happened ${chunkPosition}`)
+  }
+
+  return processInfo
+}
+
 /***
  * Send the file part to AEM
  * 
@@ -335,19 +433,23 @@ async function getBlockInit(aemFileSpecs,logger) {
 async function sendFilePartToAem(transferUrl,data,aemFileSpecs,contentType,logger){
   logger.debug(`sendFilePartToAem ${transferUrl} ${contentType}`)
   //logger.debug(JSON.stringify(aemFileSpecs,null,2))
+  let processInfo = {}
 
   try {
-    let req = unirest('PUT', transferUrl)
+    let res = await unirest('PUT', transferUrl)
     .headers({
       'Content-Type': contentType,
     })
-    .send(Buffer.from(data))
-    .end(function (res) { 
-      if (res.error){
-        throw new Error(res.error)
-      }
-      logger.debug(res.raw_body)
-    })
+    .send(data)
+
+    // return true
+    processInfo.status = res.status
+    processInfo.body = res.raw_body
+
+    if (res.error){
+      processInfo.status = res.status
+      processInfo.body = error
+    }
     // const callOptions = {
     //   method: 'put',
     //   headers: {
@@ -366,13 +468,13 @@ async function sendFilePartToAem(transferUrl,data,aemFileSpecs,contentType,logge
     //   logger.debug(`PUT to ${transferUrl} successful ${putRes.status} !!!!!!!!!!!!`)
     // }
 
-    // return true
-
   } catch (errorMessage) {
-    return errorResponse(500, `Unable PUT ${transferUrl} :${errorMessage}`, logger)
+    processInfo.status = 500
+    processInfo.body = errorMessage
+    //return errorResponse(500, `Unable PUT ${transferUrl} :${errorMessage}`, logger)
   }
 
-  return true
+  return processInfo
 }
 
 exports.main = main

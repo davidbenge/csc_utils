@@ -42,7 +42,7 @@ async function main (params) {
     }
 
     if(!params.permissions){
-      params.permissions = 'w'
+      params.permissions = 'rw'
     }
 
     if(params.fileName.length < 2){
